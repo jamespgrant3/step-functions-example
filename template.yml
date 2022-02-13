@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A stack to support credit limit increases
+Resources:
+  LimitIncreaseStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: A role for step function interaction
+      RoleName: limit-increase-state-function 
+
+  LimitIncreaseStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties: 
+      StateMachineName: limit-increase 
+      DefinitionString: |-
+        {
+          "Comment": "A state machine to process credit limit increases",
+          "StartAt": "Noop",
+          "States": {
+            "Noop": {
+              "Type": "Pass",
+              "ResultPath": "$.coords",
+              "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt LimitIncreaseStateMachineRole.Arn
