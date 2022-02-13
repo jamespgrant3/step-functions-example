@@ -1,0 +1,1 @@
+This repo will contain a [CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/Welcome.html) template that can be used to create, and demonstrate, a simple [Step Function](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html).
