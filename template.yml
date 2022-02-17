@@ -1,6 +1,173 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: A stack to support credit limit increases
 Resources:
+  LimitIncreaseStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties: 
+      StateMachineName: limit-increase 
+      DefinitionString: |-
+        {
+          "Comment": "A state machine to process credit limit increases",
+          "StartAt": "FetchCustomerCreditAndFico",
+          "States": {
+            "FetchCustomerCreditAndFico": {
+              "Type": "Parallel",
+              "Next": "CreditLimitIncrease",
+              "Branches": [
+                {
+                  "StartAt": "FetchCustomer",
+                  "States": {
+                    "FetchCustomer": {
+                      "Type": "Task",
+                      "Resource": "${FetchCustomerLambdaArn}",
+                      "End": true,
+                      "ResultPath": "$.customer"
+                    }
+                  }
+                },
+                {
+                  "StartAt": "FetchCredit",
+                  "States": {
+                    "FetchCredit": {
+                      "Type": "Task",
+                      "Resource": "${FetchCreditLambdaArn}",
+                      "End": true,
+                      "ResultPath": "$.credit"
+                    }
+                  }
+                },
+                {
+                  "StartAt": "FetchFico",
+                  "States": {
+                    "FetchFico": {
+                      "Type": "Task",
+                      "Resource": "${FetchFicoArn}",
+                      "End": true,
+                      "ResultPath": "$.fico"
+                    }
+                  }
+                }
+              ],
+              "ResultPath": "$.result"
+            },
+            "CreditLimitIncrease": {
+              "Type": "Task",
+              "Resource": "${DetermineIncreaseArn}",
+              "End": true,
+              "ResultPath": "$.determination"
+            }
+          }
+        }
+      DefinitionSubstitutions:
+        FetchCustomerLambdaArn: !GetAtt CustomerServiceLambda.Arn
+        FetchCreditLambdaArn: !GetAtt CreditServiceLambda.Arn
+        FetchFicoArn: !GetAtt FicoServiceLambda.Arn
+        DetermineIncreaseArn: !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
+      RoleArn: !GetAtt LimitIncreaseStateMachineRole.Arn
+
+  CustomerServiceLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event, context) => ({
+            firstName: "James",
+            lastName: "Grant"
+          })
+      Description: A service to fetch customer data
+
+  CreditServiceLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          // create a random credit limit
+          const getCreditLimit = (min, max) => Math.trunc(Math.random() * (max - min) + min);
+
+          exports.handler = async (event, context) => ({
+            limit: getCreditLimit(300, 50000)
+          });
+      Description: A service to fetch customer credit info 
+
+  FicoServiceLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          const min = 300;
+          const max = 850;
+
+          // generate a random credit score between min and max
+          const getFicoScore = (minScore, maxScore) => Math.trunc(Math.random() * (maxScore - minScore) + minScore);
+
+          exports.handler = async (event, context) => ({
+            score: getFicoScore(min, max)
+          });
+      Description: A service to fetch the customers fico score
+
+  CreditLimitIncreaseDecisionServiceLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs14.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          const determineNewLimit = (currentLimit, percentageIncrease) =>
+             currentLimit + (currentLimit * (1 * percentageIncrease));
+          
+          const determineIncrease = (isApproved, percentageIncrease, oldLimit) => {
+            const newLimit = determineNewLimit(oldLimit, percentageIncrease);
+
+            return {
+              isApproved,
+              percentageIncrease,
+              oldLimit,
+              newLimit
+            }
+          };
+
+
+          // increase model:
+          // 300-579: Poor        0% increase
+          // 580-669: Fair        3% increase
+          // 670-739: Good        5% increase
+          // 740-799: Very good   7% increase
+          // 800-850: Excellent   10% increase
+          exports.handler = async (event, context) => {
+            const { result } = event;
+
+            // fetch each response from the event
+            const [ customerResponse, creditResponse, ficoResponse ] = result;
+
+            // grab the customers limit and fico score
+            const { credit: { limit } } = creditResponse;
+            const { fico: { score } } = ficoResponse;
+
+            // run some simple logic based off of the requirements
+            if(score <= 579) {
+              return determineIncrease(false, 0, limit);
+            } else if(score >= 580 && score <= 669) {
+              return determineIncrease(true, .03, limit);
+            } else if(score >= 670 && score <= 739) {
+              return determineIncrease(true, .05, limit);
+            } else if(score >= 740 && score <= 799) {
+              return determineIncrease(true, .07, limit);
+            } else if(score >= 800 && score <= 850 ) {
+              return determineIncrease(true, .10, limit);
+            }
+          };
+      Description: A service to determine if the limit can be increased
+
   LimitIncreaseStateMachineRole:
     Type: AWS::IAM::Role
     Properties: 
@@ -10,29 +177,44 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - lambda.amazonaws.com
+                - states.amazonaws.com
             Action:
-              - 'sts:AssumeRole'
+              - "sts:AssumeRole"
       Description: A role for step function interaction
-      RoleName: limit-increase-state-function 
-
-  LimitIncreaseStateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Properties: 
-      StateMachineName: limit-increase 
-      DefinitionString: |-
-        {
-          "Comment": "A state machine to process credit limit increases",
-          "StartAt": "Noop",
-          "States": {
-            "Noop": {
-              "Type": "Pass",
-              "ResultPath": "$.coords",
-              "End": true
-            }
-          }
-        }
-      RoleArn: !GetAtt LimitIncreaseStateMachineRole.Arn
+      RoleName: limit-increase-state-machine
+      Policies:
+        - PolicyName: allow-customer-service-lambda-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt CustomerServiceLambda.Arn
+        - PolicyName: allow-credit-service-lambda-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt CreditServiceLambda.Arn
+        - PolicyName: allow-fico-service-lambda-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt FicoServiceLambda.Arn
+        - PolicyName: allow-credit-limit-decision-service-lambda-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -57,104 +239,3 @@ Resources:
             - logs:*
             Resource: arn:aws:logs:*:*:*
 
-  CustomerServiceLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      Runtime: nodejs14.x
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Handler: index.handler
-      Code:
-        ZipFile: |
-          exports.handler = async (event, context) => ({
-            firstName: "James",
-            lastName: "Grant"
-          })
-      Description: A service to fetch customer data
-
-  CreditServiceLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      Runtime: nodejs14.x
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Handler: index.handler
-      Code:
-        ZipFile: |
-          const getCreditLimit = (min, max) => Math.trunc(Math.random() * (max - min) + min);
-
-          exports.handler = async (event, context) => ({
-            limit: getCreditLimit(300, 50000)
-          });
-      Description: A service to fetch customer credit info 
-
-  CreditBureauServiceLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      Runtime: nodejs14.x
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Handler: index.handler
-      Code:
-        ZipFile: |
-          const min = 300;
-          const max = 850;
-          const getFicoScore = (minScore, maxScore) => Math.trunc(Math.random() * (maxScore - minScore) + minScore);
-
-          exports.handler = async (event, context) => ({
-            fico: getFicoScore(min, max)
-          });
-      Description: A service to fetch the customers fico score
-
-  CreditLimitIncreaseDecisionServiceLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      Runtime: nodejs14.x
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Handler: index.handler
-      Code:
-        ZipFile: |
-          const determineNewLimit = (currentLimit, percentageIncrease) =>
-             currentLimit +
-              (currentLimit * (1 * percentageIncrease));
-          
-          const buildStandardResponse = (isApproved, percentageIncrease, oldLimit, newLimit) => ({
-            isApproved,
-            percentageIncrease,
-            oldLimit,
-            newLimit
-          });
-
-          // increase model:
-          // 300-579: Poor        0% increase
-          // 580-669: Fair        3% increase
-          // 670-739: Good        5% increase
-          // 740-799: Very good   7% increase
-          // 800-850: Excellent   10% increase
-          exports.handler = async (event, context) => {
-            const { fico, currentLimit } = event;
-
-            if(fico <= 579) {
-              return buildStandardResponse(false, 0, currentLimit, currentLimit);
-            } else if(fico >= 580 && fico <= 669) {
-              const percentageIncrease = .03;
-              const newLimit = determineNewLimit(currentLimit, percentageIncrease);
-
-              console.log('new limit', newLimit);
-
-              return buildStandardResponse(true, percentageIncrease, currentLimit, newLimit);
-            } else if(fico >= 670 && fico <= 739) {
-              const percentageIncrease = .05;
-              const newLimit = determineNewLimit(currentLimit, percentageIncrease);
-
-              return buildStandardResponse(true, percentageIncrease, currentLimit, newLimit);
-            } else if(fico >= 740 && fico <= 799) {
-              const percentageIncrease = .07;
-              const newLimit = determineNewLimit(currentLimit, percentageIncrease);
-
-              return buildStandardResponse(true, percentageIncrease, currentLimit, newLimit);
-            } else if(fico >= 800 && fico <= 850 ) {
-              const percentageIncrease = .10;
-              const newLimit = determineNewLimit(currentLimit, percentageIncrease);
-
-              return buildStandardResponse(true, percentageIncrease, currentLimit, newLimit);
-            }
-          };
-      Description: A service to determine if the limit can be increased
