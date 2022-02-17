@@ -189,12 +189,11 @@ Resources:
               Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: [
-                !GetAtt CustomerServiceLambda.Arn,
-                !GetAtt CreditServiceLambda.Arn,
-                !GetAtt FicoServiceLambda.Arn,
-                !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
-              ]
+              Resource:
+                - !GetAtt CustomerServiceLambda.Arn
+                - !GetAtt CreditServiceLambda.Arn
+                - !GetAtt FicoServiceLambda.Arn
+                - !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
