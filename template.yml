@@ -136,7 +136,6 @@ Resources:
             }
           };
 
-
           // increase model:
           // 300-579: Poor        0% increase
           // 580-669: Fair        3% increase
@@ -183,44 +182,25 @@ Resources:
       Description: A role for step function interaction
       RoleName: limit-increase-state-machine
       Policies:
-        - PolicyName: allow-customer-service-lambda-invoke
+        - PolicyName: limit-increase-state-machine
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               Effect: Allow
               Action:
                 - lambda:InvokeFunction
-              Resource: !GetAtt CustomerServiceLambda.Arn
-        - PolicyName: allow-credit-service-lambda-invoke
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt CreditServiceLambda.Arn
-        - PolicyName: allow-fico-service-lambda-invoke
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt FicoServiceLambda.Arn
-        - PolicyName: allow-credit-limit-decision-service-lambda-invoke
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
+              Resource: [
+                !GetAtt CustomerServiceLambda.Arn,
+                !GetAtt CreditServiceLambda.Arn,
+                !GetAtt FicoServiceLambda.Arn,
+                !GetAtt CreditLimitIncreaseDecisionServiceLambda.Arn
+              ]
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
         - Effect: Allow
           Principal:
@@ -232,7 +212,7 @@ Resources:
       Policies:
       - PolicyName: root
         PolicyDocument:
-          Version: '2012-10-17'
+          Version: "2012-10-17"
           Statement:
           - Effect: Allow
             Action:
